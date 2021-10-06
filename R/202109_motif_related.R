@@ -1,3 +1,7 @@
+# convert a motif list to PFMatrix
+motif_list_to_PFMatrix<- function(motif_list){map(motif_list, function(x){PFMatrix(profileMatrix = x %>% set_rownames(c("A","C","G","T")))} )}
+
+
 # aux function to help orienting the motifs
 .sum_comse <- function(con){
   nub <- con %>% str_split("") %>%.[[1]] %>% as.data.frame()
@@ -158,6 +162,105 @@ uniquemotif_files <- function(files,outdir=NULL,consensus_ic_threshold=1,total_i
 # # motifs %>% ggseqlogo_lab_list() %>% print()
 
 
-# convert a list of PFM
-motif_list_to_PFMatrix<- function(motif_list){map(motif_list, function(x){PFMatrix(profileMatrix = x %>% set_rownames(c("A","C","G","T")))} )}
+
+#' Still buggy, have to run 2-3 times to get real uniq motifs
+#'
+#' @param uni_motif_list
+#' @param similarity_corr_threshold
+#'
+#' @return
+#' @export
+#'
+#' @examples
+motifs_keep_uniq<-function(uni_motif_list, similarity_corr_threshold=0.9)
+{
+  # retain only uniq motifs
+  for (n in 1:length(uni_motif_list)){
+    # if(is.null(uni_motif_list[n] %>% unlist()))next
+    if(is.na(uni_motif_list[n]))next
+    t1 <- uni_motif_list[[n]]
+    t1rc <- motif_rc(t1)
+    pwm_1 <- convert_motifs(t1, "TFBSTools-PWMatrix")
+    pwm_1rc <- convert_motifs(t1rc, "TFBSTools-PWMatrix")
+    p <- n+1
+    for (m in p:length(uni_motif_list)){
+      if(is.null(uni_motif_list[m] %>% unlist()))next
+      if(is.na(uni_motif_list[m]))next
+      if(m==n)next
+      t2 <- uni_motif_list[[m]]
+      pwm_2 <- convert_motifs(t2, "TFBSTools-PWMatrix")
+      if(((PWMSimilarity(pwm_1, pwm_2, method="Pearson")) > similarity_corr_threshold)){
+        if (uni_motif_list[[m]]["icscore"] < uni_motif_list[[n]]["icscore"]){ uni_motif_list[[m]]=NA} else { uni_motif_list[[n]]=uni_motif_list[[m]]; uni_motif_list[[m]]=NA}
+      } else if((PWMSimilarity(pwm_1rc, pwm_2, method="Pearson")) > similarity_corr_threshold) {
+        if (uni_motif_list[[m]]["icscore"] < uni_motif_list[[n]]["icscore"]){ uni_motif_list[[m]]=NA} else { uni_motif_list[[n]]=uni_motif_list[[m]]; uni_motif_list[[m]]=NA}
+      }
+    }
+  }
+  uni_motif_list[is.na(uni_motif_list)]=NULL
+  uni_motif_list
+}
+
+
+#' orient the motifs
+#'
+#' @param uni_motif_list
+#'
+#' @return
+#' @export
+#'
+#' @examples
+motifs_orient<-function(uni_motif_list){
+  uni_PCMs=uni_motif_list
+  uni_rcPCMs=map(uni_PCMs,function(x){motif_rc(x)})
+  map2(uni_PCMs,uni_rcPCMs, function(pcm,rcpcm){
+    if(.sum_comse(pcm["consensus"])> .sum_comse(rcpcm["consensus"])){
+      return(rcpcm)}else{return(pcm)}
+  })
+}
+
+
+
+
+#' Filter for low quality motifs by consensus
+#'
+#' @param uni_motif_list
+#' @param consensus_ic_threshold
+#'
+#' @return
+#' @export
+#'
+#' @examples
+motifs_filter_by_quality<-function(uni_motif_list,consensus_ic_threshold=1){
+  uni_motif_list=map(uni_motif_list,function(x){
+    if(str_detect(x["consensus"],"^N+[^ATCGRYWSMKHBVD]$"))return(NULL)  #repeat N consensus
+    if(str_detect(x["consensus"],"^N*[[RYWSMKHBVD]+N*[RYWSMKHBVD]+]+N*$"))return(NULL) #unreliable consensus
+    if(.IC_calc(x["consensus"]) > consensus_ic_threshold)return(NULL) #consensus lacks variety
+    x
+  })
+  null_filter=map(uni_motif_list,is.null) %>% unlist()
+  uni_motif_list[null_filter %>% which]=NULL
+  uni_motif_list
+}
+
+
+
+
+#' filter motifs by IC content
+#'
+#' @param uni_motif_list
+#' @param total_ic_threshold
+#' @param total_ic_threshold_upper
+#' @param iclength_treshold
+#'
+#' @return
+#' @export
+#'
+#' @examples
+motifs_filter_by_IC<-function(uni_motif_list, total_ic_threshold = 3, total_ic_threshold_upper=30, iclength_treshold=0.3){
+  motif_dt_unique <- to_df(uni_motif_list) %>%  mutate(iclength = icscore / str_length(consensus))
+  motiffilter_dt <- filter(motif_dt_unique,icscore > total_ic_threshold) %>% filter(icscore < total_ic_threshold_upper)
+  motiffilter_dt <- filter(motiffilter_dt,iclength > iclength_treshold)
+  motiffilter_dt %>% to_list()
+}
+
 
